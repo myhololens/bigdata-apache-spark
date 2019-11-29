@@ -401,9 +401,10 @@ public final class UnsafeRow extends InternalRow implements Externalizable, Kryo
     } else {
       final long offsetAndSize = getLong(ordinal);
       final int offset = (int) (offsetAndSize >> 32);
-      final int months = (int) Platform.getLong(baseObject, baseOffset + offset);
+      final int months = Platform.getInt(baseObject, baseOffset + offset);
+      final int days = Platform.getInt(baseObject, baseOffset + offset + 4);
       final long microseconds = Platform.getLong(baseObject, baseOffset + offset + 8);
-      return new CalendarInterval(months, microseconds);
+      return new CalendarInterval(months, days, microseconds);
     }
   }
 
@@ -541,14 +542,7 @@ public final class UnsafeRow extends InternalRow implements Externalizable, Kryo
    * Returns the underlying bytes for this UnsafeRow.
    */
   public byte[] getBytes() {
-    if (baseObject instanceof byte[] && baseOffset == Platform.BYTE_ARRAY_OFFSET
-      && (((byte[]) baseObject).length == sizeInBytes)) {
-      return (byte[]) baseObject;
-    } else {
-      byte[] bytes = new byte[sizeInBytes];
-      Platform.copyMemory(baseObject, baseOffset, bytes, Platform.BYTE_ARRAY_OFFSET, sizeInBytes);
-      return bytes;
-    }
+    return UnsafeDataUtils.getBytes(baseObject, baseOffset, sizeInBytes);
   }
 
   // This is for debugging

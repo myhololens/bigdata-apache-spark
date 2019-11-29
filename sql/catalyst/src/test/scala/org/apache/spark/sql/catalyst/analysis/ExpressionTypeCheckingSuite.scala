@@ -77,9 +77,9 @@ class ExpressionTypeCheckingSuite extends SparkFunSuite {
     assertErrorForDifferingTypes(BitwiseOr('intField, 'booleanField))
     assertErrorForDifferingTypes(BitwiseXor('intField, 'booleanField))
 
-    assertError(Add('booleanField, 'booleanField), "requires (numeric or calendarinterval) type")
+    assertError(Add('booleanField, 'booleanField), "requires (numeric or interval) type")
     assertError(Subtract('booleanField, 'booleanField),
-      "requires (numeric or calendarinterval) type")
+      "requires (numeric or interval) type")
     assertError(Multiply('booleanField, 'booleanField), "requires numeric type")
     assertError(Divide('booleanField, 'booleanField), "requires (double or decimal) type")
     assertError(Remainder('booleanField, 'booleanField), "requires numeric type")
@@ -144,14 +144,13 @@ class ExpressionTypeCheckingSuite extends SparkFunSuite {
     assertSuccess(Sum('stringField))
     assertSuccess(Average('stringField))
     assertSuccess(Min('arrayField))
-    assertSuccess(new EveryAgg('booleanField))
-    assertSuccess(new AnyAgg('booleanField))
-    assertSuccess(new SomeAgg('booleanField))
+    assertSuccess(new BoolAnd('booleanField))
+    assertSuccess(new BoolOr('booleanField))
 
     assertError(Min('mapField), "min does not support ordering on type")
     assertError(Max('mapField), "max does not support ordering on type")
-    assertError(Sum('booleanField), "function sum requires numeric type")
-    assertError(Average('booleanField), "function average requires numeric type")
+    assertError(Sum('booleanField), "requires (numeric or interval) type")
+    assertError(Average('booleanField), "requires (numeric or interval) type")
   }
 
   test("check types for others") {

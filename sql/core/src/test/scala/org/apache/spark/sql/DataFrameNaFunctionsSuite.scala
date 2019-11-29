@@ -20,9 +20,10 @@ package org.apache.spark.sql
 import scala.collection.JavaConverters._
 
 import org.apache.spark.sql.internal.SQLConf
-import org.apache.spark.sql.test.SharedSQLContext
+import org.apache.spark.sql.test.SharedSparkSession
+import org.apache.spark.sql.types.{StringType, StructType}
 
-class DataFrameNaFunctionsSuite extends QueryTest with SharedSQLContext {
+class DataFrameNaFunctionsSuite extends QueryTest with SharedSparkSession {
   import testImplicits._
 
   def createDF(): DataFrame = {
@@ -231,6 +232,68 @@ class DataFrameNaFunctionsSuite extends QueryTest with SharedSQLContext {
     }
   }
 
+  def createDFsWithSameFieldsName(): (DataFrame, DataFrame) = {
+    val df1 = Seq(
+      ("f1-1", "f2", null),
+      ("f1-2", null, null),
+      ("f1-3", "f2", "f3-1"),
+      ("f1-4", "f2", "f3-1")
+    ).toDF("f1", "f2", "f3")
+    val df2 = Seq(
+      ("f1-1", null, null),
+      ("f1-2", "f2", null),
+      ("f1-3", "f2", "f4-1")
+    ).toDF("f1", "f2", "f4")
+    (df1, df2)
+  }
+
+  test("fill unambiguous field for join operation") {
+    val (df1, df2) = createDFsWithSameFieldsName()
+    val joined_df = df1.join(df2, Seq("f1"), joinType = "left_outer")
+    checkAnswer(joined_df.na.fill("", cols = Seq("f4")),
+      Row("f1-1", "f2", null, null, "") ::
+        Row("f1-2", null, null, "f2", "") ::
+        Row("f1-3", "f2", "f3-1", "f2", "f4-1") ::
+        Row("f1-4", "f2", "f3-1", null, "") :: Nil)
+  }
+
+  test("fill ambiguous field for join operation") {
+    val (df1, df2) = createDFsWithSameFieldsName()
+    val joined_df = df1.join(df2, Seq("f1"), joinType = "left_outer")
+
+    val message = intercept[AnalysisException] {
+      joined_df.na.fill("", cols = Seq("f2"))
+    }.getMessage
+    assert(message.contains("Reference 'f2' is ambiguous"))
+  }
+
+  test("fill with col(*)") {
+    val df = createDF()
+    // If columns are specified with "*", they are ignored.
+    checkAnswer(df.na.fill("new name", Seq("*")), df.collect())
+  }
+
+  test("fill with nested columns") {
+    val schema = new StructType()
+      .add("c1", new StructType()
+        .add("c1-1", StringType)
+        .add("c1-2", StringType))
+
+    val data = Seq(
+      Row(Row(null, "a2")),
+      Row(Row("b1", "b2")),
+      Row(null))
+
+    val df = spark.createDataFrame(
+      spark.sparkContext.parallelize(data), schema)
+
+    checkAnswer(df.select("c1.c1-1"),
+      Row(null) :: Row("b1") :: Row(null) :: Nil)
+
+    // Nested columns are ignored for fill().
+    checkAnswer(df.na.fill("a1", Seq("c1.c1-1")), data)
+  }
+
   test("replace") {
     val input = createDF()
 
@@ -304,5 +367,22 @@ class DataFrameNaFunctionsSuite extends QueryTest with SharedSQLContext {
         "Bob" -> null
       )).na.drop("name" :: Nil).select("name"),
       Row("Alice") :: Row("David") :: Nil)
+  }
+
+  test("SPARK-29890: duplicate names are allowed for fill() if column names are not specified.") {
+    val left = Seq(("1", null), ("3", "4")).toDF("col1", "col2")
+    val right = Seq(("1", "2"), ("3", null)).toDF("col1", "col2")
+    val df = left.join(right, Seq("col1"))
+
+    // If column names are specified, the following fails due to ambiguity.
+    val exception = intercept[AnalysisException] {
+      df.na.fill("hello", Seq("col2"))
+    }
+    assert(exception.getMessage.contains("Reference 'col2' is ambiguous"))
+
+    // If column names are not specified, fill() is applied to all the eligible columns.
+    checkAnswer(
+      df.na.fill("hello"),
+      Row("1", "hello", "2") :: Row("3", "4", "hello") :: Nil)
   }
 }
